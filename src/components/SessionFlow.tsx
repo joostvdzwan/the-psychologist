@@ -168,7 +168,7 @@ export function SessionFlow() {
   const pausedForAudioRef = useRef(false);
   const greetingFiredRef = useRef(false);
   const sendTurnRef = useRef<(t: string) => Promise<void>>(async () => {});
-  const startContinuousListeningRef = useRef<() => void>(() => {});
+  const startContinuousListeningRef = useRef<(retryLeft?: number) => void>(() => {});
 
   useEffect(() => {
     sessionIdRef.current = sessionId;
@@ -205,7 +205,7 @@ export function SessionFlow() {
       recognitionActiveRef.current = false;
       const r = recognitionRef.current;
       if (r) {
-        try { r.stop(); } catch { /* */ }
+        try { r.abort ? r.abort() : r.stop(); } catch { /* */ }
         recognitionRef.current = null;
       }
       if (silenceTimerRef.current) {
@@ -549,8 +549,14 @@ export function SessionFlow() {
     return r;
   };
 
-  const startContinuousListening = () => {
-    const r = recognitionRef.current ?? setupRecognition();
+  const startContinuousListening = (retryLeft = 2) => {
+    const prev = recognitionRef.current;
+    if (prev) {
+      recognitionRef.current = null;
+      try { prev.abort ? prev.abort() : prev.stop(); } catch { /* */ }
+    }
+
+    const r = setupRecognition();
     if (!r) return;
     speechHadErrorRef.current = false;
     accumulatedRef.current = "";
@@ -561,7 +567,16 @@ export function SessionFlow() {
       r.start();
     } catch {
       setListening(false);
-      setStatusLine("Could not start speech recognition — try typing below.");
+      recognitionRef.current = null;
+      if (retryLeft > 0) {
+        setTimeout(() => {
+          if (recognitionActiveRef.current && sessionIdRef.current && !pausedForAudioRef.current) {
+            startContinuousListeningRef.current(retryLeft - 1);
+          }
+        }, 300);
+      } else {
+        setStatusLine("Could not start speech recognition — try typing below.");
+      }
     }
   };
   startContinuousListeningRef.current = startContinuousListening;
@@ -571,7 +586,7 @@ export function SessionFlow() {
     const r = recognitionRef.current;
     recognitionRef.current = null;
     if (r) {
-      try { r.stop(); } catch { /* */ }
+      try { r.abort ? r.abort() : r.stop(); } catch { /* */ }
     }
     if (silenceTimerRef.current) {
       clearTimeout(silenceTimerRef.current);
@@ -785,13 +800,17 @@ export function SessionFlow() {
   useEffect(() => {
     if (step !== "session" || !sessionId) return;
     recognitionActiveRef.current = true;
-    startContinuousListening();
+    // Defer so Strict Mode cleanup clears the timer before it fires
+    const timer = setTimeout(() => {
+      if (recognitionActiveRef.current) startContinuousListening();
+    }, 80);
     return () => {
+      clearTimeout(timer);
       recognitionActiveRef.current = false;
       const r = recognitionRef.current;
       recognitionRef.current = null;
       if (r) {
-        try { r.stop(); } catch { /* */ }
+        try { r.abort ? r.abort() : r.stop(); } catch { /* */ }
       }
       if (silenceTimerRef.current) {
         clearTimeout(silenceTimerRef.current);
