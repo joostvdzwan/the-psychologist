@@ -845,7 +845,7 @@ export function SessionFlow() {
 
   return (
     <div className="relative mx-auto flex min-h-0 w-full max-w-5xl flex-1 flex-col gap-8">
-      <audio ref={guideAudioRef} className="hidden" playsInline preload="auto" />
+      <audio ref={guideAudioRef} className="hidden" playsInline preload="auto"></audio>
 
       <header className={`space-y-4${step === "session" || step === "ended" ? " hidden" : ""}`}>
         <div className="flex items-baseline justify-between gap-3">
