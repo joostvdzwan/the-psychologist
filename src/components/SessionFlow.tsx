@@ -205,7 +205,7 @@ export function SessionFlow() {
       recognitionActiveRef.current = false;
       const r = recognitionRef.current;
       if (r) {
-        try { r.abort ? r.abort() : r.stop(); } catch { /* */ }
+        try { r.stop(); } catch { /* */ }
         recognitionRef.current = null;
       }
       if (silenceTimerRef.current) {
@@ -553,7 +553,7 @@ export function SessionFlow() {
     const prev = recognitionRef.current;
     if (prev) {
       recognitionRef.current = null;
-      try { prev.abort ? prev.abort() : prev.stop(); } catch { /* */ }
+      try { prev.stop(); } catch { /* */ }
     }
 
     const r = setupRecognition();
@@ -586,7 +586,7 @@ export function SessionFlow() {
     const r = recognitionRef.current;
     recognitionRef.current = null;
     if (r) {
-      try { r.abort ? r.abort() : r.stop(); } catch { /* */ }
+      try { r.stop(); } catch { /* */ }
     }
     if (silenceTimerRef.current) {
       clearTimeout(silenceTimerRef.current);
@@ -810,7 +810,7 @@ export function SessionFlow() {
       const r = recognitionRef.current;
       recognitionRef.current = null;
       if (r) {
-        try { r.abort ? r.abort() : r.stop(); } catch { /* */ }
+        try { r.stop(); } catch { /* */ }
       }
       if (silenceTimerRef.current) {
         clearTimeout(silenceTimerRef.current);
