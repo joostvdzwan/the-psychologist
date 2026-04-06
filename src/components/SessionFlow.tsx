@@ -527,6 +527,8 @@ export function SessionFlow() {
     };
 
     r.onend = () => {
+      if (recognitionRef.current !== null && recognitionRef.current !== r) return;
+
       setListening(false);
       processedCountRef.current = 0;
       recognitionRef.current = null;
