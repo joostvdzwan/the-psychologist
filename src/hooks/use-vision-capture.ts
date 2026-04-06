@@ -9,6 +9,9 @@ type VisionContext = {
   movement: string;
   environment: string;
   overall_affect: string;
+  affect_shift: string;
+  congruence_note: string;
+  arousal_level: string;
 };
 
 export type UseVisionCaptureOpts = {
@@ -35,12 +38,18 @@ function captureFrameDataUrl(video: HTMLVideoElement): string | null {
   return c.toDataURL("image/jpeg", 0.65);
 }
 
+const DEFAULT_INTERVAL_MS = 6000;
+const FAST_INTERVAL_MS = 3000;
+const FAST_CAPTURE_COUNT = 2;
+
 export function useVisionCapture({ active, sessionId, videoRef }: UseVisionCaptureOpts) {
   const [visionContext, setVisionContext] = useState<VisionContext | null>(null);
   const [visionAnalyzing, setVisionAnalyzing] = useState(false);
 
   const summarySeqRef = useRef(0);
   const summaryInFlightRef = useRef(false);
+  const intervalMsRef = useRef(DEFAULT_INTERVAL_MS);
+  const fastCapturesLeftRef = useRef(0);
 
   const pushSummary = useCallback(async () => {
     if (!sessionId || !active) return;
@@ -66,11 +75,28 @@ export function useVisionCapture({ active, sessionId, videoRef }: UseVisionCaptu
       const j = (await res.json()) as {
         vision?: VisionContext;
         seq?: number;
+        affect_shift?: string;
         error?: string;
       };
       if (res.ok) {
         if (j.vision) setVisionContext(j.vision);
         if (typeof j.seq === "number") summarySeqRef.current = j.seq;
+
+        const shift = j.affect_shift ?? j.vision?.affect_shift ?? "";
+        const isSignificant =
+          shift !== "" &&
+          shift !== "no significant change" &&
+          shift !== "no previous observation";
+
+        if (isSignificant) {
+          fastCapturesLeftRef.current = FAST_CAPTURE_COUNT;
+          intervalMsRef.current = FAST_INTERVAL_MS;
+        } else if (fastCapturesLeftRef.current > 0) {
+          fastCapturesLeftRef.current -= 1;
+          if (fastCapturesLeftRef.current === 0) {
+            intervalMsRef.current = DEFAULT_INTERVAL_MS;
+          }
+        }
       }
     } catch {
       /* best-effort */
@@ -82,14 +108,30 @@ export function useVisionCapture({ active, sessionId, videoRef }: UseVisionCaptu
 
   useEffect(() => {
     if (!active || !sessionId) return;
-    const id = setInterval(() => void pushSummary(), 6000);
+
+    let timer: ReturnType<typeof setTimeout>;
+    let cancelled = false;
+
+    const tick = () => {
+      if (cancelled) return;
+      void pushSummary();
+      timer = setTimeout(tick, intervalMsRef.current);
+    };
+
     void pushSummary();
-    return () => clearInterval(id);
+    timer = setTimeout(tick, intervalMsRef.current);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [active, sessionId, pushSummary]);
 
   const resetVision = useCallback(() => {
     setVisionContext(null);
     summarySeqRef.current = 0;
+    intervalMsRef.current = DEFAULT_INTERVAL_MS;
+    fastCapturesLeftRef.current = 0;
   }, []);
 
   return { visionContext, visionAnalyzing, resetVision };

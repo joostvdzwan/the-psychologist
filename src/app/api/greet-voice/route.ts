@@ -61,10 +61,12 @@ export async function POST(req: Request) {
           name: psych.name,
           approach: psych.approach,
           personality: psych.personality,
+          visionGuidance: psych.visionGuidance,
         }
       : undefined;
 
-    const prompt = greetingPrompt(persona);
+    const hasVision = session.summary !== "No visual context yet (camera off or still initializing).";
+    const prompt = greetingPrompt(persona, hasVision ? session.summary : undefined);
 
     const stream = new ReadableStream({
       async start(controller) {

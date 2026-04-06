@@ -2,7 +2,7 @@ import { CRISIS_MESSAGE, detectCrisisSignal } from "@/lib/crisis";
 import { createElevenLabsStream } from "@/lib/elevenlabs-ws";
 import { gemmaGenerateTextStream } from "@/lib/gemma";
 import { getPsychologistById } from "@/lib/psychologists";
-import { type PersonaInfo, dialoguePlainSystemBlock } from "@/lib/prompts";
+import { type PersonaInfo, type VisionContext, dialoguePlainSystemBlock } from "@/lib/prompts";
 import { appendMessages, getSession } from "@/lib/session-store";
 import { NextResponse } from "next/server";
 
@@ -19,15 +19,17 @@ function buildPlainPrompt(
   transcript: string,
   history: string,
   persona?: PersonaInfo,
+  vision?: VisionContext,
 ) {
-  const system = dialoguePlainSystemBlock(sessionSummary, persona);
+  const system = dialoguePlainSystemBlock(sessionSummary, persona, vision);
   return `${system}
 
 Conversation so far:
 ${history || "(start of session)"}
 
-Patient said:
-${transcript}
+Patient said: "${transcript}"
+Their current non-verbal presentation: ${sessionSummary}
+If what they said and how they appear seem incongruent, gently and carefully explore that — guided by your therapeutic approach.
 
 Your response:`;
 }
@@ -90,6 +92,7 @@ export async function POST(req: Request) {
           name: psych.name,
           approach: psych.approach,
           personality: psych.personality,
+          visionGuidance: psych.visionGuidance,
         }
       : undefined;
 
@@ -98,6 +101,7 @@ export async function POST(req: Request) {
       transcript,
       history,
       persona,
+      session.vision,
     );
 
     const FLUSH_RE = /[.!?]\s*$/;

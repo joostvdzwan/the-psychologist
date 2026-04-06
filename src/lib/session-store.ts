@@ -16,6 +16,7 @@ export type SessionRecord = {
   psychologistId: string;
   summary: string;
   vision: VisionContext;
+  previousVision: VisionContext;
   summaryUpdatedAt: number;
   summarySeq: number;
   messages: ChatMessage[];
@@ -36,6 +37,7 @@ export function createSession(psychologistId: string, voiceId: string): SessionR
     psychologistId,
     summary: "No visual context yet (camera off or still initializing).",
     vision: { ...EMPTY_VISION },
+    previousVision: { ...EMPTY_VISION },
     summaryUpdatedAt: now,
     summarySeq: 0,
     messages: [],
@@ -66,6 +68,7 @@ export function updateSummary(
     return { ok: true, seq: s.summarySeq };
   }
   s.summarySeq += 1;
+  s.previousVision = { ...s.vision };
   s.summary = text;
   s.vision = vision;
   s.summaryUpdatedAt = Date.now();

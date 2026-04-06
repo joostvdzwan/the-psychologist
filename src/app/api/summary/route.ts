@@ -1,5 +1,5 @@
 import { gemmaGenerateWithImage } from "@/lib/gemma";
-import { SUMMARY_SYSTEM, EMPTY_VISION, formatVisionForDialogue } from "@/lib/prompts";
+import { buildSummaryPrompt, EMPTY_VISION, formatVisionForDialogue } from "@/lib/prompts";
 import type { VisionContext } from "@/lib/prompts";
 import { extractJsonObject } from "@/lib/parse-model-json";
 import { getSession, updateSummary } from "@/lib/session-store";
@@ -12,6 +12,9 @@ const VISION_FIELDS: (keyof VisionContext)[] = [
   "movement",
   "environment",
   "overall_affect",
+  "affect_shift",
+  "congruence_note",
+  "arousal_level",
 ];
 
 function parseVision(raw: string): { vision: VisionContext; dialogueText: string } {
@@ -42,14 +45,16 @@ export async function POST(req: Request) {
       );
     }
 
-    if (!getSession(sessionId)) {
+    const session = getSession(sessionId);
+    if (!session) {
       return NextResponse.json({ error: "Session expired or invalid" }, { status: 404 });
     }
 
+    const summaryPrompt = buildSummaryPrompt(session.vision);
     const raw = await gemmaGenerateWithImage(
       imageBase64,
       mimeType,
-      SUMMARY_SYSTEM,
+      summaryPrompt,
     );
 
     let vision: VisionContext;
@@ -69,7 +74,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Session expired" }, { status: 404 });
     }
 
-    return NextResponse.json({ vision, seq: newSeq });
+    return NextResponse.json({ vision, seq: newSeq, affect_shift: vision.affect_shift });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Summary failed";
     const status =
