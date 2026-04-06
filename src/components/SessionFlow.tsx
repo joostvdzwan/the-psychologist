@@ -28,7 +28,56 @@ type WebSpeechRec = {
   onend: (() => void) | null;
 };
 
-const SILENCE_MS = 2000;
+const SILENCE_MS = 1200;
+
+const SENTENCE_END_RE = /[.!?]\s/;
+const MIN_FIRST_SENTENCE_LEN = 30;
+
+async function fetchTtsBlob(
+  text: string,
+  voiceId: string,
+  stability: number,
+  similarity_boost: number,
+): Promise<Blob> {
+  const res = await fetch("/api/tts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, voiceId, stability, similarity_boost }),
+  });
+  if (!res.ok) {
+    const err = (await res.json().catch(() => ({}))) as {
+      error?: string;
+      detail?: string;
+    };
+    const msg = err.detail
+      ? `${err.error ?? "TTS failed"}: ${err.detail}`
+      : (err.error ?? "Audio failed");
+    throw new Error(msg);
+  }
+  return res.blob();
+}
+
+function playBlob(audioEl: HTMLAudioElement, blob: Blob): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const prev = audioEl.src;
+    if (prev.startsWith("blob:")) URL.revokeObjectURL(prev);
+    const url = URL.createObjectURL(blob);
+    audioEl.src = url;
+
+    const cleanup = () => {
+      audioEl.removeEventListener("ended", onDone);
+      audioEl.removeEventListener("pause", onDone);
+      audioEl.removeEventListener("error", onErr);
+      if (audioEl.src === url) URL.revokeObjectURL(url);
+    };
+    const onDone = () => { cleanup(); resolve(); };
+    const onErr = () => { cleanup(); reject(new Error("Audio playback error")); };
+    audioEl.addEventListener("ended", onDone);
+    audioEl.addEventListener("pause", onDone);
+    audioEl.addEventListener("error", onErr);
+    audioEl.play().catch((err) => { cleanup(); reject(err); });
+  });
+}
 
 type Step = "intro" | "select" | "permissions" | "session" | "ended";
 
@@ -480,6 +529,7 @@ export function SessionFlow() {
     r.onend = () => {
       setListening(false);
       processedCountRef.current = 0;
+      recognitionRef.current = null;
       if (!pausedForAudioRef.current) {
         flushAccumulated();
       }
@@ -517,6 +567,7 @@ export function SessionFlow() {
   const pauseRecForAudio = () => {
     pausedForAudioRef.current = true;
     const r = recognitionRef.current;
+    recognitionRef.current = null;
     if (r) {
       try { r.stop(); } catch { /* */ }
     }
@@ -567,6 +618,8 @@ export function SessionFlow() {
       let reply = "";
       let vs = DEFAULT_VOICE;
       let crisis = false;
+      let firstSentence = "";
+      let firstTtsPromise: Promise<Blob> | null = null;
 
       if (ct.includes("application/json")) {
         const data = (await res.json()) as {
@@ -593,6 +646,16 @@ export function SessionFlow() {
           if (done) break;
           acc += dec.decode(value, { stream: true });
           setGuideStreaming(acc);
+
+          if (!firstTtsPromise && acc.length >= MIN_FIRST_SENTENCE_LEN) {
+            const match = SENTENCE_END_RE.exec(acc);
+            if (match && match.index + 1 >= MIN_FIRST_SENTENCE_LEN) {
+              firstSentence = acc.slice(0, match.index + 1).trim();
+              firstTtsPromise = fetchTtsBlob(
+                firstSentence, vid, vs.stability, vs.similarity_boost,
+              );
+            }
+          }
         }
         reply = acc.trim();
         setGuideStreaming("");
@@ -609,51 +672,27 @@ export function SessionFlow() {
       const audioEl = guideAudioRef.current;
       if (!audioEl) throw new Error("Audio not ready — reload and try again.");
 
-      const audioRes = await fetch("/api/tts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          text: reply,
-          voiceId: vid,
-          stability: vs.stability,
-          similarity_boost: vs.similarity_boost,
-        }),
-      });
-
-      if (!audioRes.ok) {
-        const err = (await audioRes.json().catch(() => ({}))) as {
-          error?: string;
-          detail?: string;
-        };
-        const msg = err.detail
-          ? `${err.error ?? "TTS failed"}: ${err.detail}`
-          : (err.error ?? "Audio failed");
-        throw new Error(msg);
-      }
-
-      const blob = await audioRes.blob();
-      const prev = audioEl.src;
-      if (prev.startsWith("blob:")) URL.revokeObjectURL(prev);
-
-      const url = URL.createObjectURL(blob);
-      audioEl.src = url;
-
       pauseRecForAudio();
       try {
-        await new Promise<void>((resolve, reject) => {
-          const cleanup = () => {
-            audioEl.removeEventListener("ended", onDone);
-            audioEl.removeEventListener("pause", onDone);
-            audioEl.removeEventListener("error", onErr);
-            if (audioEl.src === url) URL.revokeObjectURL(url);
-          };
-          const onDone = () => { cleanup(); resolve(); };
-          const onErr = () => { cleanup(); reject(new Error("Audio playback error")); };
-          audioEl.addEventListener("ended", onDone);
-          audioEl.addEventListener("pause", onDone);
-          audioEl.addEventListener("error", onErr);
-          audioEl.play().catch((err) => { cleanup(); reject(err); });
-        });
+        if (firstTtsPromise && firstSentence) {
+          const remainder = reply.slice(firstSentence.length).trim();
+          const remainderPromise = remainder
+            ? fetchTtsBlob(remainder, vid, vs.stability, vs.similarity_boost)
+            : null;
+
+          const firstBlob = await firstTtsPromise;
+          await playBlob(audioEl, firstBlob);
+
+          if (remainderPromise) {
+            const remainderBlob = await remainderPromise;
+            await playBlob(audioEl, remainderBlob);
+          }
+        } else {
+          const blob = await fetchTtsBlob(
+            reply, vid, vs.stability, vs.similarity_boost,
+          );
+          await playBlob(audioEl, blob);
+        }
       } catch (playErr) {
         throw new Error(
           playErr instanceof Error
@@ -715,47 +754,11 @@ export function SessionFlow() {
       const audioEl = guideAudioRef.current;
       if (!audioEl) throw new Error("Audio not ready");
 
-      const audioRes = await fetch("/api/tts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          text: greeting,
-          voiceId: vid,
-          stability: 0.55,
-          similarity_boost: 0.78,
-        }),
-      });
-
-      if (!audioRes.ok) {
-        const err = (await audioRes.json().catch(() => ({}))) as { error?: string; detail?: string };
-        const msg = err.detail
-          ? `${err.error ?? "TTS failed"}: ${err.detail}`
-          : (err.error ?? "Audio failed");
-        throw new Error(msg);
-      }
-
-      const blob = await audioRes.blob();
-      const prev = audioEl.src;
-      if (prev.startsWith("blob:")) URL.revokeObjectURL(prev);
-      const url = URL.createObjectURL(blob);
-      audioEl.src = url;
+      const blob = await fetchTtsBlob(greeting, vid, 0.55, 0.78);
 
       pauseRecForAudio();
       try {
-        await new Promise<void>((resolve, reject) => {
-          const cleanup = () => {
-            audioEl.removeEventListener("ended", onDone);
-            audioEl.removeEventListener("pause", onDone);
-            audioEl.removeEventListener("error", onErr);
-            if (audioEl.src === url) URL.revokeObjectURL(url);
-          };
-          const onDone = () => { cleanup(); resolve(); };
-          const onErr = () => { cleanup(); reject(new Error("Audio playback error")); };
-          audioEl.addEventListener("ended", onDone);
-          audioEl.addEventListener("pause", onDone);
-          audioEl.addEventListener("error", onErr);
-          audioEl.play().catch((err) => { cleanup(); reject(err); });
-        });
+        await playBlob(audioEl, blob);
       } catch {
         /* greeting audio failed — not critical */
       } finally {
@@ -784,6 +787,7 @@ export function SessionFlow() {
     return () => {
       recognitionActiveRef.current = false;
       const r = recognitionRef.current;
+      recognitionRef.current = null;
       if (r) {
         try { r.stop(); } catch { /* */ }
       }
