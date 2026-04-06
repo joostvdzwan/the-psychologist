@@ -1,9 +1,9 @@
 import { CRISIS_MESSAGE, detectCrisisSignal } from "@/lib/crisis";
 import { gemmaGenerateText, gemmaGenerateTextStream } from "@/lib/gemma";
 import { getPsychologistById } from "@/lib/psychologists";
-import { type PersonaInfo, type VisionContext, dialoguePlainSystemBlock } from "@/lib/prompts";
+import { type PersonaInfo, type VisionContext, dialoguePlainSystemBlock, getSessionPhase } from "@/lib/prompts";
 import { maybeCompressDigest } from "@/lib/conversation-digest";
-import { appendMessages, getSession } from "@/lib/session-store";
+import { appendMessages, appendModelMessage, getSession } from "@/lib/session-store";
 import { NextResponse } from "next/server";
 
 const DEFAULT_STYLE = { stability: 0.55, similarity_boost: 0.78 };
@@ -20,18 +20,23 @@ function buildPlainPrompt(
   persona?: PersonaInfo,
   vision?: VisionContext,
   digest?: string,
+  createdAt?: number,
+  endsAt?: number,
 ) {
-  const system = dialoguePlainSystemBlock(sessionSummary, persona, vision);
+  const isSilence = transcript === "[silence]";
+  const phase = createdAt && endsAt ? getSessionPhase(createdAt, endsAt) : undefined;
+  const system = dialoguePlainSystemBlock(sessionSummary, persona, vision, phase, isSilence);
   const digestSection = digest
     ? `\nEarlier in this session (summarized):\n${digest}\n\nRecent conversation:\n${history || "(start of session)"}`
     : `\nConversation so far:\n${history || "(start of session)"}`;
 
+  const patientLine = isSilence
+    ? `\n(The patient has been silent.)`
+    : `\nPatient said: "${transcript}"`;
+
   return `${system}
 ${digestSection}
-
-Patient said: "${transcript}"
-Their current non-verbal presentation: ${sessionSummary}
-If what they said and how they appear seem incongruent, gently and carefully explore that — guided by your therapeutic approach.
+${patientLine}
 
 Your response:`;
 }
@@ -57,7 +62,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Session expired or invalid" }, { status: 404 });
     }
 
-    if (detectCrisisSignal(transcript)) {
+    const isSilence = transcript === "[silence]";
+
+    if (!isSilence && detectCrisisSignal(transcript)) {
       appendMessages(sessionId, transcript, CRISIS_MESSAGE);
       return NextResponse.json({
         crisis: true,
@@ -73,10 +80,10 @@ export async function POST(req: Request) {
 
     const psych = getPsychologistById(session.psychologistId);
     const persona: PersonaInfo | undefined = psych
-      ? { name: psych.name, approach: psych.approach, personality: psych.personality, visionGuidance: psych.visionGuidance }
+      ? { name: psych.name, approach: psych.approach, personality: psych.personality, visionGuidance: psych.visionGuidance, dialogueStyle: psych.dialogueStyle }
       : undefined;
 
-    const prompt = buildPlainPrompt(session.summary, transcript, history, persona, session.vision, session.conversationDigest || undefined);
+    const prompt = buildPlainPrompt(session.summary, transcript, history, persona, session.vision, session.conversationDigest || undefined, session.createdAt, session.endsAt);
 
     if (wantStream) {
       const encoder = new TextEncoder();
@@ -90,7 +97,11 @@ export async function POST(req: Request) {
               full += delta;
               controller.enqueue(encoder.encode(delta));
             }
-            appendMessages(sid, userLine, full.trim());
+            if (isSilence) {
+              appendModelMessage(sid, full.trim());
+            } else {
+              appendMessages(sid, userLine, full.trim());
+            }
             maybeCompressDigest(sid);
             controller.close();
           } catch (err) {
@@ -110,7 +121,11 @@ export async function POST(req: Request) {
 
     const raw = await gemmaGenerateText(prompt);
     const reply = raw.trim();
-    appendMessages(sessionId, transcript, reply);
+    if (isSilence) {
+      appendModelMessage(sessionId, reply);
+    } else {
+      appendMessages(sessionId, transcript, reply);
+    }
     maybeCompressDigest(sessionId);
 
     return NextResponse.json({

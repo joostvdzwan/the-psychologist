@@ -1,16 +1,6 @@
 import { type RefObject } from "react";
 import { GuidePresence } from "@/components/GuidePresence";
-import { VisionRail } from "@/components/VisionRail";
 import { VoiceActivityBars } from "@/components/VoiceActivityBars";
-
-type VisionContext = {
-  face: string;
-  gaze: string;
-  posture: string;
-  movement: string;
-  environment: string;
-  overall_affect: string;
-};
 
 type LogEntry = { role: "you" | "guide"; text: string };
 
@@ -32,8 +22,6 @@ export type SessionPanelProps = {
   speechChecked: boolean;
   speechSupported: boolean;
   httpSpeechTip: boolean;
-  visionContext: VisionContext | null;
-  visionAnalyzing: boolean;
   videoRef: RefObject<HTMLVideoElement | null>;
   guideAudioRef: RefObject<HTMLAudioElement | null>;
   shellClass: string;
@@ -64,8 +52,6 @@ export function SessionPanel({
   speechChecked,
   speechSupported,
   httpSpeechTip,
-  visionContext,
-  visionAnalyzing,
   videoRef,
   guideAudioRef,
   shellClass,
@@ -122,8 +108,6 @@ export function SessionPanel({
           />
         </div>
       </div>
-
-      <VisionRail vision={visionContext} analyzing={visionAnalyzing} />
 
       <div className="min-h-[120px] space-y-2.5 overflow-y-auto rounded-xl border border-[var(--psych-panel-border)] bg-[color-mix(in_srgb,var(--psych-surface)_88%,transparent)] p-3.5 text-sm leading-relaxed">
         {log.length === 0 && !guideStreaming && (

@@ -61,6 +61,9 @@ export function SessionFlow() {
   const busyRef = useRef(false);
   const greetingFiredRef = useRef(false);
   const sendTurnRef = useRef<(t: string) => Promise<void>>(async () => {});
+  const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pauseVisionRef = useRef<() => void>(() => {});
+  const resumeVisionRef = useRef<() => void>(() => {});
 
   useEffect(() => { sessionIdRef.current = sessionId; }, [sessionId]);
   useEffect(() => { selectedVoiceIdRef.current = selectedVoiceId; }, [selectedVoiceId]);
@@ -77,11 +80,16 @@ export function SessionFlow() {
       prevAudio.currentTime = 0;
     }
 
+    const isSilenceTurn = transcript === "[silence]";
+
+    pauseVisionRef.current();
     setBusy(true);
     speech.pauseForAudio();
     setGuideStreaming("");
-    speech.setStatus("Responding…");
-    setLog((L) => [...L, { role: "you", text: transcript }]);
+    speech.setStatus(isSilenceTurn ? "" : "Responding…");
+    if (!isSilenceTurn) {
+      setLog((L) => [...L, { role: "you", text: transcript }]);
+    }
 
     try {
       const res = await fetch("/api/turn-voice", {
@@ -151,6 +159,7 @@ export function SessionFlow() {
       setGuideStreaming("");
       speech.setStatus(e instanceof Error ? e.message : "Error");
     } finally {
+      resumeVisionRef.current();
       speech.resumeAfterAudio();
       setBusy(false);
     }
@@ -170,11 +179,45 @@ export function SessionFlow() {
 
   useEffect(() => { speech.markBusy(busy); }, [busy, speech.markBusy]);
 
-  const { visionContext, visionAnalyzing, resetVision } = useVisionCapture({
+  const SILENCE_TURN_MS = 25_000;
+
+  const clearSilenceTimer = useCallback(() => {
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
+  }, []);
+
+  const startSilenceTimer = useCallback(() => {
+    clearSilenceTimer();
+    silenceTimerRef.current = setTimeout(() => {
+      silenceTimerRef.current = null;
+      if (!busyRef.current && sessionIdRef.current) {
+        void sendTurnRef.current("[silence]");
+      }
+    }, SILENCE_TURN_MS);
+  }, [clearSilenceTimer]);
+
+  useEffect(() => {
+    if (step !== "session" || !sessionId) {
+      clearSilenceTimer();
+      return;
+    }
+    if (!busy && greetingFiredRef.current) {
+      startSilenceTimer();
+    } else {
+      clearSilenceTimer();
+    }
+  }, [busy, step, sessionId, startSilenceTimer, clearSilenceTimer]);
+
+  const { visionContext, visionAnalyzing, resetVision, pauseVision, resumeVision } = useVisionCapture({
     active: step === "session" && !!sessionId,
     sessionId,
     videoRef,
   });
+
+  useEffect(() => { pauseVisionRef.current = pauseVision; }, [pauseVision]);
+  useEffect(() => { resumeVisionRef.current = resumeVision; }, [resumeVision]);
 
   // Countdown timer
   useEffect(() => {
@@ -350,6 +393,7 @@ export function SessionFlow() {
     const vid = selectedVoiceIdRef.current;
     if (!sid || !vid) return;
 
+    pauseVisionRef.current();
     setBusy(true);
     speech.pauseForAudio();
     speech.setStatus("Starting session…");
@@ -390,6 +434,7 @@ export function SessionFlow() {
       setGuideStreaming("");
       speech.setStatus(e instanceof Error ? e.message : "Greeting failed");
     } finally {
+      resumeVisionRef.current();
       speech.resumeAfterAudio();
       setBusy(false);
     }
@@ -418,6 +463,7 @@ export function SessionFlow() {
   };
 
   const handleRestart = () => {
+    clearSilenceTimer();
     setStep("intro");
     setSessionId(null);
     setSelectedPsychId("");
@@ -504,8 +550,6 @@ export function SessionFlow() {
           speechChecked={speech.speechChecked}
           speechSupported={speech.speechSupported}
           httpSpeechTip={speech.httpSpeechTip}
-          visionContext={visionContext}
-          visionAnalyzing={visionAnalyzing}
           videoRef={videoRef}
           guideAudioRef={guideAudioRef}
           shellClass={sessionShellClass}

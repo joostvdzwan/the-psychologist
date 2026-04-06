@@ -50,10 +50,12 @@ export function useVisionCapture({ active, sessionId, videoRef }: UseVisionCaptu
   const summaryInFlightRef = useRef(false);
   const intervalMsRef = useRef(DEFAULT_INTERVAL_MS);
   const fastCapturesLeftRef = useRef(0);
+  const pausedRef = useRef(false);
 
   const pushSummary = useCallback(async () => {
     if (!sessionId || !active) return;
     if (summaryInFlightRef.current) return;
+    if (pausedRef.current) return;
     const video = videoRef.current;
     if (!video) return;
     const dataUrl = captureFrameDataUrl(video);
@@ -134,5 +136,8 @@ export function useVisionCapture({ active, sessionId, videoRef }: UseVisionCaptu
     fastCapturesLeftRef.current = 0;
   }, []);
 
-  return { visionContext, visionAnalyzing, resetVision };
+  const pauseVision = useCallback(() => { pausedRef.current = true; }, []);
+  const resumeVision = useCallback(() => { pausedRef.current = false; }, []);
+
+  return { visionContext, visionAnalyzing, resetVision, pauseVision, resumeVision };
 }

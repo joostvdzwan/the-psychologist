@@ -2,9 +2,9 @@ import { CRISIS_MESSAGE, detectCrisisSignal } from "@/lib/crisis";
 import { createElevenLabsStream } from "@/lib/elevenlabs-ws";
 import { gemmaGenerateTextStream } from "@/lib/gemma";
 import { getPsychologistById } from "@/lib/psychologists";
-import { type PersonaInfo, type VisionContext, dialoguePlainSystemBlock } from "@/lib/prompts";
+import { type PersonaInfo, type VisionContext, dialoguePlainSystemBlock, getSessionPhase } from "@/lib/prompts";
 import { maybeCompressDigest } from "@/lib/conversation-digest";
-import { appendMessages, getSession } from "@/lib/session-store";
+import { appendMessages, appendModelMessage, getSession } from "@/lib/session-store";
 import { NextResponse } from "next/server";
 
 type TurnVoiceBody = {
@@ -22,18 +22,23 @@ function buildPlainPrompt(
   persona?: PersonaInfo,
   vision?: VisionContext,
   digest?: string,
+  createdAt?: number,
+  endsAt?: number,
 ) {
-  const system = dialoguePlainSystemBlock(sessionSummary, persona, vision);
+  const isSilence = transcript === "[silence]";
+  const phase = createdAt && endsAt ? getSessionPhase(createdAt, endsAt) : undefined;
+  const system = dialoguePlainSystemBlock(sessionSummary, persona, vision, phase, isSilence);
   const digestSection = digest
     ? `\nEarlier in this session (summarized):\n${digest}\n\nRecent conversation:\n${history || "(start of session)"}`
     : `\nConversation so far:\n${history || "(start of session)"}`;
 
+  const patientLine = isSilence
+    ? `\n(The patient has been silent.)`
+    : `\nPatient said: "${transcript}"`;
+
   return `${system}
 ${digestSection}
-
-Patient said: "${transcript}"
-Their current non-verbal presentation: ${sessionSummary}
-If what they said and how they appear seem incongruent, gently and carefully explore that — guided by your therapeutic approach.
+${patientLine}
 
 Your response:`;
 }
@@ -80,7 +85,9 @@ export async function POST(req: Request) {
       );
     }
 
-    if (detectCrisisSignal(transcript)) {
+    const isSilence = transcript === "[silence]";
+
+    if (!isSilence && detectCrisisSignal(transcript)) {
       appendMessages(sessionId, transcript, CRISIS_MESSAGE);
       return NextResponse.json({ crisis: true, reply: CRISIS_MESSAGE });
     }
@@ -97,6 +104,7 @@ export async function POST(req: Request) {
           approach: psych.approach,
           personality: psych.personality,
           visionGuidance: psych.visionGuidance,
+          dialogueStyle: psych.dialogueStyle,
         }
       : undefined;
 
@@ -107,6 +115,8 @@ export async function POST(req: Request) {
       persona,
       session.vision,
       session.conversationDigest || undefined,
+      session.createdAt,
+      session.endsAt,
     );
 
     const FLUSH_RE = /[.!?]\s*$/;
@@ -133,26 +143,37 @@ export async function POST(req: Request) {
           const [firstChunk] = await Promise.all([firstChunkP, elStream.ready]);
 
           let fullReply = "";
+          let earlyFlushed = false;
+          const EARLY_FLUSH_CHARS = 32;
 
           if (!firstChunk.done && firstChunk.value) {
             fullReply += firstChunk.value;
             writeLine(controller, { type: "text", data: firstChunk.value });
             elStream.send(firstChunk.value);
-            if (FLUSH_RE.test(fullReply)) elStream.flush();
+            if (FLUSH_RE.test(fullReply)) { elStream.flush(); earlyFlushed = true; }
           }
 
           for await (const delta of llmIter) {
             fullReply += delta;
             writeLine(controller, { type: "text", data: delta });
             elStream.send(delta);
-            if (FLUSH_RE.test(fullReply)) elStream.flush();
+            if (!earlyFlushed && fullReply.length >= EARLY_FLUSH_CHARS) {
+              elStream.flush();
+              earlyFlushed = true;
+            } else if (FLUSH_RE.test(fullReply)) {
+              elStream.flush();
+            }
           }
 
           elStream.end();
           await audioPromise;
 
           const reply = fullReply.trim();
-          appendMessages(sessionId, transcript, reply);
+          if (isSilence) {
+            appendModelMessage(sessionId, reply);
+          } else {
+            appendMessages(sessionId, transcript, reply);
+          }
           maybeCompressDigest(sessionId);
           writeLine(controller, {
             type: "done",

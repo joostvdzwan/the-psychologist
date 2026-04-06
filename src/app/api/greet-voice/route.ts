@@ -90,19 +90,26 @@ export async function POST(req: Request) {
           const [firstChunk] = await Promise.all([firstChunkP, elStream.ready]);
 
           let fullReply = "";
+          let earlyFlushed = false;
+          const EARLY_FLUSH_CHARS = 32;
 
           if (!firstChunk.done && firstChunk.value) {
             fullReply += firstChunk.value;
             writeLine(controller, { type: "text", data: firstChunk.value });
             elStream.send(firstChunk.value);
-            if (FLUSH_RE.test(fullReply)) elStream.flush();
+            if (FLUSH_RE.test(fullReply)) { elStream.flush(); earlyFlushed = true; }
           }
 
           for await (const delta of llmIter) {
             fullReply += delta;
             writeLine(controller, { type: "text", data: delta });
             elStream.send(delta);
-            if (FLUSH_RE.test(fullReply)) elStream.flush();
+            if (!earlyFlushed && fullReply.length >= EARLY_FLUSH_CHARS) {
+              elStream.flush();
+              earlyFlushed = true;
+            } else if (FLUSH_RE.test(fullReply)) {
+              elStream.flush();
+            }
           }
 
           elStream.end();
