@@ -135,7 +135,7 @@ export function VisionRail({ vision, analyzing }: VisionRailProps) {
 
   const [revealedKeys, setRevealedKeys] = useState<Set<string>>(new Set());
   const [affectRevealed, setAffectRevealed] = useState(false);
-  const [expandedMobile, setExpandedMobile] = useState<string | null>(null);
+  const [collapsedMobile, setCollapsedMobile] = useState<Set<string>>(new Set());
   const [fresh, setFresh] = useState(false);
 
   /* Stable-count typewriter hooks (one per field + affect) */
@@ -196,7 +196,13 @@ export function VisionRail({ vision, analyzing }: VisionRailProps) {
   }, [vision, rm]);
 
   const toggleMobile = useCallback(
-    (key: string) => setExpandedMobile((prev) => (prev === key ? null : key)),
+    (key: string) =>
+      setCollapsedMobile((prev) => {
+        const next = new Set(prev);
+        if (next.has(key)) next.delete(key);
+        else next.add(key);
+        return next;
+      }),
     [],
   );
 
@@ -302,7 +308,7 @@ export function VisionRail({ vision, analyzing }: VisionRailProps) {
             {FIELDS.map((f) => {
               const revealed = revealedKeys.has(f.key);
               const t = tw[f.key];
-              const isOpen = expandedMobile === f.key;
+              const isOpen = !collapsedMobile.has(f.key);
               return (
                 <button
                   key={f.key}

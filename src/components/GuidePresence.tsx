@@ -51,12 +51,16 @@ export function GuidePresence({ audioRef, active, name = "Guide" }: GuidePresenc
     const Ctor = getAudioContextCtor();
     if (!Ctor) return;
 
+    // Prefer AudioContext pre-warmed during user gesture (startPermissions)
     let ctx = ctxRef.current;
     if (!ctx || ctx.state === "closed") {
-      ctx = new Ctor();
+      const preWarmed = (window as unknown as { __psychAudioCtx?: AudioContext }).__psychAudioCtx;
+      ctx = preWarmed && preWarmed.state !== "closed" ? preWarmed : new Ctor();
       ctxRef.current = ctx;
     }
-    await ctx.resume().catch(() => {});
+    try { await ctx.resume(); } catch { /* not in gesture context */ }
+
+    if (ctx.state !== "running") return;
 
     try {
       const source = ctx.createMediaElementSource(audio);

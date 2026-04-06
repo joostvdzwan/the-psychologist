@@ -296,8 +296,17 @@ export function SessionFlow() {
 
     const audioEl = guideAudioRef.current;
     if (audioEl) {
+      // Unlock audio playback via a muted play during user gesture
       audioEl.muted = true;
       audioEl.play().then(() => { audioEl.pause(); audioEl.muted = false; }).catch(() => { audioEl.muted = false; });
+      // Pre-resume AudioContext so GuidePresence visualizer doesn't block audio
+      const W = window as unknown as { AudioContext?: typeof AudioContext; webkitAudioContext?: typeof AudioContext };
+      const Ctor = W.AudioContext ?? W.webkitAudioContext;
+      if (Ctor) {
+        const ctx = new Ctor();
+        void ctx.resume().catch(() => {});
+        (window as unknown as { __psychAudioCtx?: AudioContext }).__psychAudioCtx = ctx;
+      }
     }
 
     try {
@@ -375,13 +384,10 @@ export function SessionFlow() {
         if (reply.trim()) {
           setLog((L) => [...L, { role: "guide", text: reply }]);
         }
-      } catch {
-        /* greeting audio failed — not critical */
+        speech.clearStatus();
       } finally {
         speech.resumeAfterAudio();
       }
-
-      speech.clearStatus();
     } catch (e) {
       setGuideStreaming("");
       speech.setStatus(e instanceof Error ? e.message : "Greeting failed");
