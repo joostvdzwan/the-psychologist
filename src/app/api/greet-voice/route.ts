@@ -1,36 +1,18 @@
-import { CRISIS_MESSAGE, detectCrisisSignal } from "@/lib/crisis";
 import { createElevenLabsStream } from "@/lib/elevenlabs-ws";
 import { gemmaGenerateTextStream } from "@/lib/gemma";
 import { getPsychologistById } from "@/lib/psychologists";
-import { type PersonaInfo, dialoguePlainSystemBlock } from "@/lib/prompts";
-import { appendMessages, getSession } from "@/lib/session-store";
+import { type PersonaInfo, greetingPrompt } from "@/lib/prompts";
+import { appendModelMessage, getSession } from "@/lib/session-store";
 import { NextResponse } from "next/server";
 
-type TurnVoiceBody = {
+type GreetVoiceBody = {
   sessionId?: string;
-  transcript?: string;
   voiceId?: string;
   stability?: number;
   similarity_boost?: number;
 };
 
-function buildPlainPrompt(
-  sessionSummary: string,
-  transcript: string,
-  history: string,
-  persona?: PersonaInfo,
-) {
-  const system = dialoguePlainSystemBlock(sessionSummary, persona);
-  return `${system}
-
-Conversation so far:
-${history || "(start of session)"}
-
-Patient said:
-${transcript}
-
-Your response:`;
-}
+const FLUSH_RE = /[.!?]\s*$/;
 
 export async function POST(req: Request) {
   const enc = new TextEncoder();
@@ -42,9 +24,8 @@ export async function POST(req: Request) {
   };
 
   try {
-    const body = (await req.json()) as TurnVoiceBody;
+    const body = (await req.json()) as GreetVoiceBody;
     const sessionId = body.sessionId ?? "";
-    const transcript = (body.transcript ?? "").trim();
     const voiceId = body.voiceId ?? "";
     const stability =
       typeof body.stability === "number" ? body.stability : 0.55;
@@ -53,9 +34,9 @@ export async function POST(req: Request) {
         ? body.similarity_boost
         : 0.78;
 
-    if (!sessionId || !transcript) {
+    if (!sessionId) {
       return NextResponse.json(
-        { error: "sessionId and transcript required" },
+        { error: "sessionId required" },
         { status: 400 },
       );
     }
@@ -74,16 +55,6 @@ export async function POST(req: Request) {
       );
     }
 
-    if (detectCrisisSignal(transcript)) {
-      appendMessages(sessionId, transcript, CRISIS_MESSAGE);
-      return NextResponse.json({ crisis: true, reply: CRISIS_MESSAGE });
-    }
-
-    const history = session.messages
-      .slice(-8)
-      .map((m) => `${m.role === "user" ? "Patient" : "You"}: ${m.text}`)
-      .join("\n");
-
     const psych = getPsychologistById(session.psychologistId);
     const persona: PersonaInfo | undefined = psych
       ? {
@@ -93,14 +64,7 @@ export async function POST(req: Request) {
         }
       : undefined;
 
-    const prompt = buildPlainPrompt(
-      session.summary,
-      transcript,
-      history,
-      persona,
-    );
-
-    const FLUSH_RE = /[.!?]\s*$/;
+    const prompt = greetingPrompt(persona);
 
     const stream = new ReadableStream({
       async start(controller) {
@@ -148,7 +112,7 @@ export async function POST(req: Request) {
           await audioPromise;
 
           const reply = fullReply.trim();
-          appendMessages(sessionId, transcript, reply);
+          appendModelMessage(sessionId, reply);
           writeLine(controller, {
             type: "done",
             data: { reply, crisis: false },
@@ -157,7 +121,7 @@ export async function POST(req: Request) {
           writeLine(controller, {
             type: "error",
             data: {
-              message: err instanceof Error ? err.message : "Turn failed",
+              message: err instanceof Error ? err.message : "Greeting failed",
             },
           });
           elStream?.destroy();
@@ -175,7 +139,7 @@ export async function POST(req: Request) {
       },
     });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "Turn failed";
+    const msg = e instanceof Error ? e.message : "Greeting failed";
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }

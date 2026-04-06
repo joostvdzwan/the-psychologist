@@ -68,7 +68,7 @@ export function createElevenLabsStream(opts: ElevenLabsStreamOptions) {
           style: 0,
         },
         generation_config: {
-          chunk_length_schedule: [50, 120, 160, 250],
+          chunk_length_schedule: [25, 80, 120, 200],
         },
         xi_api_key: apiKey,
       }),

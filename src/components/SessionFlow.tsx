@@ -344,42 +344,37 @@ export function SessionFlow() {
     speech.setStatus("Starting session…");
 
     try {
-      const res = await fetch("/api/greet", {
+      const res = await fetch("/api/greet-voice", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId: sid }),
+        body: JSON.stringify({ sessionId: sid, voiceId: vid }),
       });
-      if (!res.ok) {
-        const err = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(err.error ?? "Greeting failed");
+
+      const ct = res.headers.get("content-type") ?? "";
+
+      if (ct.includes("application/json")) {
+        const data = (await res.json()) as { error?: string };
+        throw new Error(data.error ?? "Greeting failed");
       }
+
+      if (!res.ok) throw new Error("Greeting failed");
       if (!res.body) throw new Error("No response body");
-
-      const reader = res.body.getReader();
-      const dec = new TextDecoder();
-      let greeting = "";
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        greeting += dec.decode(value, { stream: true });
-        setGuideStreaming(greeting);
-      }
-      greeting = greeting.trim();
-      setGuideStreaming("");
-
-      if (!greeting) { speech.clearStatus(); return; }
-
-      setLog((L) => [...L, { role: "guide", text: greeting }]);
-      speech.setStatus("Speaking…");
 
       const audioEl = guideAudioRef.current;
       if (!audioEl) throw new Error("Audio not ready");
 
-      const blob = await fetchTtsBlob(greeting, vid, 0.55, 0.78);
-
       speech.pauseForAudio();
       try {
-        await playBlob(audioEl, blob);
+        const { reply } = await processVoiceStream(
+          res.body,
+          audioEl,
+          (text) => setGuideStreaming(text),
+        );
+        setGuideStreaming("");
+
+        if (reply.trim()) {
+          setLog((L) => [...L, { role: "guide", text: reply }]);
+        }
       } catch {
         /* greeting audio failed — not critical */
       } finally {
