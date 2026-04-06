@@ -106,11 +106,13 @@ export function SessionPanel({
         </p>
       )}
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
-        <div className="relative overflow-hidden rounded-xl border border-[var(--psych-panel-border)] bg-black/50 shadow-inner">
-          <span className="absolute left-3 top-3 z-10 rounded-md bg-black/45 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-white/90 backdrop-blur-sm">
-            You
-          </span>
+      <div className="relative">
+        <GuidePresence
+          key={sessionId ?? "idle"}
+          audioRef={guideAudioRef}
+          active
+        />
+        <div className="absolute bottom-3 right-3 z-10 w-[35%] overflow-hidden rounded-lg border border-white/20 bg-black/60 shadow-lg sm:w-[25%]">
           <video
             ref={videoRef}
             className="aspect-video w-full object-cover"
@@ -118,13 +120,7 @@ export function SessionPanel({
             muted
             autoPlay
           />
-          <div className="psych-vitals-line absolute bottom-3 left-5 right-5" />
         </div>
-        <GuidePresence
-          key={sessionId ?? "idle"}
-          audioRef={guideAudioRef}
-          active
-        />
       </div>
 
       <VisionRail vision={visionContext} analyzing={visionAnalyzing} />

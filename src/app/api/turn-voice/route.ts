@@ -118,32 +118,27 @@ export async function POST(req: Request) {
             }
           })();
 
+          // Kick off LLM immediately so its TTFT overlaps with WS handshake
+          const llmIter = gemmaGenerateTextStream(prompt);
+          const firstChunkP = llmIter.next();
+          const [firstChunk] = await Promise.all([firstChunkP, elStream.ready]);
+
           let fullReply = "";
-          let wsReady = false;
-          let pendingText = "";
 
-          elStream.ready.then(() => {
-            wsReady = true;
-            if (pendingText) {
-              elStream!.send(pendingText);
-              if (FLUSH_RE.test(pendingText)) elStream!.flush();
-              pendingText = "";
-            }
-          });
-
-          for await (const delta of gemmaGenerateTextStream(prompt)) {
-            fullReply += delta;
-            writeLine(controller, { type: "text", data: delta });
-
-            if (wsReady) {
-              elStream.send(delta);
-              if (FLUSH_RE.test(fullReply)) elStream.flush();
-            } else {
-              pendingText += delta;
-            }
+          if (!firstChunk.done && firstChunk.value) {
+            fullReply += firstChunk.value;
+            writeLine(controller, { type: "text", data: firstChunk.value });
+            elStream.send(firstChunk.value);
+            if (FLUSH_RE.test(fullReply)) elStream.flush();
           }
 
-          await elStream.ready;
+          for await (const delta of llmIter) {
+            fullReply += delta;
+            writeLine(controller, { type: "text", data: delta });
+            elStream.send(delta);
+            if (FLUSH_RE.test(fullReply)) elStream.flush();
+          }
+
           elStream.end();
           await audioPromise;
 

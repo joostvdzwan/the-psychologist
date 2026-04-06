@@ -130,19 +130,40 @@ export function GuidePresence({ audioRef, active, name = "Guide" }: GuidePresenc
   }, [active, audioRef, initGraphOnFirstPlay, reducedMotion, stopVisualizer]);
 
   return (
-    <>
-      {/* Mobile: compact card */}
-      <div className="flex items-center gap-3 overflow-hidden rounded-xl border border-[var(--psych-panel-border)] bg-black/40 px-4 py-3 shadow-inner sm:hidden">
-        <span className="text-[10px] font-semibold uppercase tracking-widest text-white/90">
-          {name}
-        </span>
-        <div className="flex items-end gap-0.5" aria-hidden>
+    <div className="relative flex aspect-video w-full flex-col overflow-hidden rounded-xl border border-[var(--psych-panel-border)] bg-black/40 shadow-inner">
+      <span className="absolute left-3 top-3 z-10 rounded-md bg-black/45 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-white/90 backdrop-blur-sm">
+        {name}
+      </span>
+
+      <div className="relative min-h-0 flex-1 bg-gradient-to-br from-[color-mix(in_srgb,var(--psych-accent)_12%,var(--psych-bg))] to-[var(--psych-bg-mid)]">
+        {!portraitFailed ? (
+          // eslint-disable-next-line @next/next/no-img-element -- intentional: graceful 404 → placeholder
+          <img
+            src={PORTRAIT_PATH}
+            alt=""
+            className="absolute inset-0 h-full w-full object-cover object-top"
+            onError={() => setPortraitFailed(true)}
+          />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-[color-mix(in_srgb,var(--psych-accent)_18%,transparent)] to-[var(--psych-bg-mid)]">
+            <span className="select-none text-3xl font-light tracking-wide text-[var(--psych-muted)]">
+              {name}
+            </span>
+          </div>
+        )}
+
+        <div
+          className="pointer-events-none absolute inset-x-0 bottom-0 flex h-[28%] items-end justify-center gap-1 pb-3 opacity-95"
+          aria-hidden
+        >
           {levels.map((h, i) => (
             <span
               key={i}
-              className="w-1 rounded-full bg-[var(--psych-signal)]"
+              className="w-1.5 rounded-full bg-[var(--psych-signal)]"
               style={{
-                height: `${Math.round(4 + h * 16)}px`,
+                height: `${Math.round(h * 100)}%`,
+                maxHeight: "100%",
+                minHeight: "12%",
                 opacity: 0.35 + h * 0.65,
                 transition: reducedMotion ? undefined : "height 45ms linear",
               }}
@@ -150,50 +171,6 @@ export function GuidePresence({ audioRef, active, name = "Guide" }: GuidePresenc
           ))}
         </div>
       </div>
-
-      {/* Desktop: full tile */}
-      <div className="relative hidden aspect-video w-full flex-col overflow-hidden rounded-xl border border-[var(--psych-panel-border)] bg-black/40 shadow-inner sm:flex">
-        <span className="absolute left-3 top-3 z-10 rounded-md bg-black/45 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-white/90 backdrop-blur-sm">
-          {name}
-        </span>
-
-        <div className="relative min-h-0 flex-1 bg-gradient-to-br from-[color-mix(in_srgb,var(--psych-accent)_12%,var(--psych-bg))] to-[var(--psych-bg-mid)]">
-          {!portraitFailed ? (
-            // eslint-disable-next-line @next/next/no-img-element -- intentional: graceful 404 → placeholder
-            <img
-              src={PORTRAIT_PATH}
-              alt=""
-              className="absolute inset-0 h-full w-full object-cover object-top"
-              onError={() => setPortraitFailed(true)}
-            />
-          ) : (
-            <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-[color-mix(in_srgb,var(--psych-accent)_18%,transparent)] to-[var(--psych-bg-mid)]">
-              <span className="select-none text-3xl font-light tracking-wide text-[var(--psych-muted)]">
-                {name}
-              </span>
-            </div>
-          )}
-
-          <div
-            className="pointer-events-none absolute inset-x-0 bottom-0 flex h-[28%] items-end justify-center gap-1 pb-3 opacity-95"
-            aria-hidden
-          >
-            {levels.map((h, i) => (
-              <span
-                key={i}
-                className="w-1.5 rounded-full bg-[var(--psych-signal)]"
-                style={{
-                  height: `${Math.round(h * 100)}%`,
-                  maxHeight: "100%",
-                  minHeight: "12%",
-                  opacity: 0.35 + h * 0.65,
-                  transition: reducedMotion ? undefined : "height 45ms linear",
-                }}
-              />
-            ))}
-          </div>
-        </div>
-      </div>
-    </>
+    </div>
   );
 }
