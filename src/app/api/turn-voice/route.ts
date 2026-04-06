@@ -3,6 +3,7 @@ import { createElevenLabsStream } from "@/lib/elevenlabs-ws";
 import { gemmaGenerateTextStream } from "@/lib/gemma";
 import { getPsychologistById } from "@/lib/psychologists";
 import { type PersonaInfo, type VisionContext, dialoguePlainSystemBlock } from "@/lib/prompts";
+import { maybeCompressDigest } from "@/lib/conversation-digest";
 import { appendMessages, getSession } from "@/lib/session-store";
 import { NextResponse } from "next/server";
 
@@ -20,12 +21,15 @@ function buildPlainPrompt(
   history: string,
   persona?: PersonaInfo,
   vision?: VisionContext,
+  digest?: string,
 ) {
   const system = dialoguePlainSystemBlock(sessionSummary, persona, vision);
-  return `${system}
+  const digestSection = digest
+    ? `\nEarlier in this session (summarized):\n${digest}\n\nRecent conversation:\n${history || "(start of session)"}`
+    : `\nConversation so far:\n${history || "(start of session)"}`;
 
-Conversation so far:
-${history || "(start of session)"}
+  return `${system}
+${digestSection}
 
 Patient said: "${transcript}"
 Their current non-verbal presentation: ${sessionSummary}
@@ -102,6 +106,7 @@ export async function POST(req: Request) {
       history,
       persona,
       session.vision,
+      session.conversationDigest || undefined,
     );
 
     const FLUSH_RE = /[.!?]\s*$/;
@@ -148,6 +153,7 @@ export async function POST(req: Request) {
 
           const reply = fullReply.trim();
           appendMessages(sessionId, transcript, reply);
+          maybeCompressDigest(sessionId);
           writeLine(controller, {
             type: "done",
             data: { reply, crisis: false },

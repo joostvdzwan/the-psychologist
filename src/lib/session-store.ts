@@ -20,6 +20,8 @@ export type SessionRecord = {
   summaryUpdatedAt: number;
   summarySeq: number;
   messages: ChatMessage[];
+  conversationDigest: string;
+  digestedUpTo: number;
 };
 
 const SESSION_MS = 10 * 60 * 1000;
@@ -41,6 +43,8 @@ export function createSession(psychologistId: string, voiceId: string): SessionR
     summaryUpdatedAt: now,
     summarySeq: 0,
     messages: [],
+    conversationDigest: "",
+    digestedUpTo: 0,
   };
   store.set(id, rec);
   return rec;
@@ -84,6 +88,14 @@ export function appendMessages(
   if (!s) return false;
   s.messages.push({ role: "user", text: userText });
   s.messages.push({ role: "model", text: modelText });
+  return true;
+}
+
+export function updateDigest(id: string, digest: string, upTo: number): boolean {
+  const s = getSession(id);
+  if (!s) return false;
+  s.conversationDigest = digest;
+  s.digestedUpTo = upTo;
   return true;
 }
 
