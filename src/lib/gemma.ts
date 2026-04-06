@@ -58,7 +58,10 @@ export async function gemmaGenerateWithImage(
     config: {
       maxOutputTokens: 512,
       temperature: 0.4,
+      thinkingConfig: { thinkingBudget: 0 },
     },
   });
-  return (response.text ?? "").trim();
+  const text = (response.text ?? "").trim();
+  if (!text) console.warn("[vision] empty model response", { model: gemmaVisionModelId() });
+  return text;
 }

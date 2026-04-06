@@ -15,7 +15,7 @@ export function gemmaModelId(): string {
   return process.env.GEMMA_MODEL_ID ?? "gemini-2.5-flash-lite";
 }
 
-/** Vision model — Gemma 4 multimodal for facial/body-language/scene analysis. */
+/** Vision model — multimodal for facial/body-language/scene analysis. */
 export function gemmaVisionModelId(): string {
-  return process.env.GEMMA_VISION_MODEL_ID ?? "gemma-4-26b-a4b-it";
+  return process.env.GEMMA_VISION_MODEL_ID ?? "gemini-2.5-flash";
 }

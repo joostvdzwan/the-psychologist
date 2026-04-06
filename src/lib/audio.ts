@@ -1,6 +1,19 @@
 export const SENTENCE_END_RE = /[.!?]\s/;
 export const MIN_FIRST_SENTENCE_LEN = 20;
 
+/** Tiny silent WAV blob URL — use during a user gesture to unlock audio on iOS. */
+export function createSilentWav(): string {
+  const header = new Uint8Array([
+    0x52, 0x49, 0x46, 0x46, 0x26, 0x00, 0x00, 0x00, // RIFF + size
+    0x57, 0x41, 0x56, 0x45, 0x66, 0x6d, 0x74, 0x20, // WAVEfmt
+    0x10, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, // PCM, mono
+    0x40, 0x1f, 0x00, 0x00, 0x80, 0x3e, 0x00, 0x00, // 8 kHz
+    0x02, 0x00, 0x10, 0x00, 0x64, 0x61, 0x74, 0x61, // 16-bit, data
+    0x02, 0x00, 0x00, 0x00, 0x00, 0x00,               // 1 silent sample
+  ]);
+  return URL.createObjectURL(new Blob([header], { type: "audio/wav" }));
+}
+
 export async function fetchTtsBlob(
   text: string,
   voiceId: string,
@@ -77,6 +90,7 @@ export async function processVoiceStream(
   let firstAppendDone = false;
 
   let resolveEndOfStream: (() => void) | null = null;
+  let playRejected = false;
 
   const tryAppend = () => {
     if (!sourceBuffer || sourceBuffer.updating) return;
@@ -105,7 +119,7 @@ export async function processVoiceStream(
           sourceBuffer.addEventListener("updateend", () => {
             if (!firstAppendDone) {
               firstAppendDone = true;
-              audioEl.play().catch(() => {});
+              audioEl.play().catch(() => { playRejected = true; });
             }
             tryAppend();
           });
@@ -180,7 +194,11 @@ export async function processVoiceStream(
         }
         audioEl.addEventListener("ended", () => resolve(), { once: true });
         const poll = setInterval(() => {
-          if (audioEl.ended || (audioEl.paused && audioEl.currentTime > 0)) {
+          if (
+            audioEl.ended ||
+            playRejected ||
+            (audioEl.paused && audioEl.currentTime > 0)
+          ) {
             clearInterval(poll);
             resolve();
           }
@@ -189,7 +207,11 @@ export async function processVoiceStream(
     }
   } else if (fallbackChunks.length > 0) {
     const blob = new Blob(fallbackChunks, { type: "audio/mpeg" });
-    await playBlob(audioEl, blob);
+    try {
+      await playBlob(audioEl, blob);
+    } catch {
+      /* Autoplay blocked or playback error — text reply still returned */
+    }
   }
 
   void resolveEndOfStream;

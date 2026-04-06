@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { WaveBand } from "@/components/WaveBand";
-import { fetchTtsBlob, playBlob, processVoiceStream } from "@/lib/audio";
+import { createSilentWav, fetchTtsBlob, playBlob, processVoiceStream } from "@/lib/audio";
 import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
 import { useVisionCapture } from "@/hooks/use-vision-capture";
 import { IntroPanel } from "@/components/steps/IntroPanel";
@@ -78,6 +78,7 @@ export function SessionFlow() {
     }
 
     setBusy(true);
+    speech.pauseForAudio();
     setGuideStreaming("");
     speech.setStatus("Responding…");
     setLog((L) => [...L, { role: "you", text: transcript }]);
@@ -110,12 +111,11 @@ export function SessionFlow() {
 
         const audioEl = guideAudioRef.current;
         if (audioEl) {
-          speech.pauseForAudio();
           try {
             const blob = await fetchTtsBlob(reply, vid, 0.55, 0.78);
             await playBlob(audioEl, blob);
-          } finally {
-            speech.resumeAfterAudio();
+          } catch {
+            /* Autoplay blocked — text reply already in log */
           }
         }
         speech.clearStatus();
@@ -133,29 +133,25 @@ export function SessionFlow() {
       const audioEl = guideAudioRef.current;
       if (!audioEl) throw new Error("Audio not ready — reload and try again.");
 
-      speech.pauseForAudio();
-      try {
-        const { reply, crisis } = await processVoiceStream(
-          res.body,
-          audioEl,
-          (text) => setGuideStreaming(text),
-        );
-        setGuideStreaming("");
+      const { reply, crisis } = await processVoiceStream(
+        res.body,
+        audioEl,
+        (text) => setGuideStreaming(text),
+      );
+      setGuideStreaming("");
 
-        if (!reply.trim()) {
-          speech.setStatus("No reply — try again or type below.");
-          return;
-        }
-
-        setLog((L) => [...L, { role: "guide", text: reply }]);
-        speech.setStatus(crisis ? "Crisis resources shown." : "");
-      } finally {
-        speech.resumeAfterAudio();
+      if (!reply.trim()) {
+        speech.setStatus("No reply — try again or type below.");
+        return;
       }
+
+      setLog((L) => [...L, { role: "guide", text: reply }]);
+      speech.setStatus(crisis ? "Crisis resources shown." : "");
     } catch (e) {
       setGuideStreaming("");
       speech.setStatus(e instanceof Error ? e.message : "Error");
     } finally {
+      speech.resumeAfterAudio();
       setBusy(false);
     }
   }, []);
@@ -296,10 +292,15 @@ export function SessionFlow() {
 
     const audioEl = guideAudioRef.current;
     if (audioEl) {
-      // Unlock audio playback via a muted play during user gesture
-      audioEl.muted = true;
-      audioEl.play().then(() => { audioEl.pause(); audioEl.muted = false; }).catch(() => { audioEl.muted = false; });
-      // Pre-resume AudioContext so GuidePresence visualizer doesn't block audio
+      // Unlock audio by playing a tiny silent WAV *unmuted* during user gesture.
+      // Muted playback doesn't count as a user-initiated play on mobile Safari.
+      const silentWav = createSilentWav();
+      audioEl.src = silentWav;
+      audioEl.play()
+        .then(() => { audioEl.pause(); })
+        .catch(() => {})
+        .finally(() => URL.revokeObjectURL(silentWav));
+
       const W = window as unknown as { AudioContext?: typeof AudioContext; webkitAudioContext?: typeof AudioContext };
       const Ctor = W.AudioContext ?? W.webkitAudioContext;
       if (Ctor) {
@@ -350,6 +351,7 @@ export function SessionFlow() {
     if (!sid || !vid) return;
 
     setBusy(true);
+    speech.pauseForAudio();
     speech.setStatus("Starting session…");
 
     try {
@@ -372,26 +374,23 @@ export function SessionFlow() {
       const audioEl = guideAudioRef.current;
       if (!audioEl) throw new Error("Audio not ready");
 
-      speech.pauseForAudio();
-      try {
-        const { reply } = await processVoiceStream(
-          res.body,
-          audioEl,
-          (text) => setGuideStreaming(text),
-        );
-        setGuideStreaming("");
+      const { reply } = await processVoiceStream(
+        res.body,
+        audioEl,
+        (text) => setGuideStreaming(text),
+      );
 
-        if (reply.trim()) {
-          setLog((L) => [...L, { role: "guide", text: reply }]);
-        }
-        speech.clearStatus();
-      } finally {
-        speech.resumeAfterAudio();
+      setGuideStreaming("");
+
+      if (reply.trim()) {
+        setLog((L) => [...L, { role: "guide", text: reply }]);
       }
+      speech.clearStatus();
     } catch (e) {
       setGuideStreaming("");
       speech.setStatus(e instanceof Error ? e.message : "Greeting failed");
     } finally {
+      speech.resumeAfterAudio();
       setBusy(false);
     }
   }, []);

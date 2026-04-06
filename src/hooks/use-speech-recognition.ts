@@ -228,7 +228,7 @@ export function useSpeechRecognition({
     if (!active) return;
     recognitionActiveRef.current = true;
     const timer = setTimeout(() => {
-      if (recognitionActiveRef.current) startContinuousListening();
+      if (recognitionActiveRef.current && !pausedForAudioRef.current) startContinuousListening();
     }, 80);
     return () => {
       clearTimeout(timer);
