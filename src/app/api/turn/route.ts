@@ -61,7 +61,7 @@ export async function POST(req: Request) {
     }
 
     const history = session.messages
-      .slice(-12)
+      .slice(-8)
       .map((m) => `${m.role === "user" ? "Patient" : "You"}: ${m.text}`)
       .join("\n");
 

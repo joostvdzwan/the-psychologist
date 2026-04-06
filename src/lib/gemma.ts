@@ -6,8 +6,11 @@ const DIALOGUE_CONFIG = {
   temperature: 0.75,
 } as const;
 
-function client() {
-  return new GoogleGenAI({ apiKey: requireGemmaApiKey() });
+let _client: GoogleGenAI | null = null;
+
+function client(): GoogleGenAI {
+  if (!_client) _client = new GoogleGenAI({ apiKey: requireGemmaApiKey() });
+  return _client;
 }
 
 export async function gemmaGenerateText(prompt: string): Promise<string> {
